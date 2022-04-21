@@ -1,0 +1,98 @@
+---
+title: "ST819/DS826 Autumn 2021: Final Project"
+author: "Thomas Nørgaard"
+output:  html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## 1. Introduction
+The main objectives of this analysis is to propose two linear regression models to predict the protein and moisture content from the Wheat data set using the 100 samples measured using diffuse reflectance from 1100 to 2500 nm at intervals of 2 nm. 
+
+The project has been made in cooperation on most parts, except for the two model approaches used.
+
+## 2. Data preparation
+X and Y blocks are made, where the X block consists of the 701 (1100 to 2500 nm at 2nm intervals) predictor variables and the Y block consists of the response variables moist and protein. The data is centered but not scaled. Since all the predictor variable are using the same measurement method, it was not deemed necessary to standardize them using scaling.  
+```{r}
+load("C:/Users/thoma/Documents/Rdata/wheat.RData")
+X <- as.matrix(wheat[,1:701])
+Y <- as.matrix(wheat[,702:703])
+X <- scale(X, center=TRUE, scale = FALSE)
+Y <- scale(Y, center=TRUE, scale = FALSE)
+```
+## 3. Exploratory data analysis
+To determine which regression approaches to use, a study of the data is necessary. The main objective here is to check for correlation and multicollinearity.
+
+```{r pressure, echo=TRUE}
+cor_X <- cor(X)
+min_cor <- abs(min(cor_X))
+mean_cor <- mean(cor_X)
+paste("The mean correlation is",mean_cor,".")
+paste("The lowest absolute value of correlation coefficient is", min_cor,".")
+print(which(cor_X==min_cor, arr.ind=TRUE))
+```
+Since the dataset has a high number of predictors, an idea about the level of correlation can be had by looking at the mean correlation. The mean correlation is 0,9251 is very high, especially considering that there are 701 predictors. However, this level of correlation is not surprising, considering the nature of the predictors. They all measure the same thing, just gradually at increasing increments of 2 nm per predictor. 
+The minimum correlation is 0,4712. This is also quite high and not surprising, giving the reason above. The least correlated predictor variable are variable 1 and 701. So the first and last. This is clear indication that there is multicollinarity in the data, which is important when determining which regression method to use for further analysis. 
+
+## 4. Methodology
+The multicollinarity of the data resulted in PLS being the first method to use for analysis. The partial least squares reduces the number of variables into a small set of new predictors, which are then used for regression.
+The second method will be a principal component analysis into a principal component regression. The PCR uses the principal component scores from the PCA to fit a regression model. This method is also suited for multicollinarity, but PCR and PLS differs in how the components are build. Where the PCR only creates components to explain the variance of X, the PLS creates components to also include explaining the variance of Y. 
+
+Considering that the data set only has 100 observations, but many predictors variables for each observation, Leave-one-out cross validation was found to be the best approach to cross-validation. The LOO runs segments equal to the number of observations, and 100 observations is not a lot. The computational requirenments are not so high, that a k-fold would be preferable. If using a k-fold approach, the MSEP could vary for each run through, because the k-fold separates into random segments of equal size (typically 10 segments). This could give situations, where in one run of the model the PCR would perform better, and in another run of the model, the PLS would perform better. That is because the k-fold chose different random segments for the MSEP. This inconsistency is avoided by using the LOO.
+
+## 5. Analysis 
+
+### 5.1 PLS
+The PLS model is made with ncomp = 35. This is because it is expected that the model will start overfitting before 35 reaching 35 components.
+```{r message=FALSE, warning=FALSE}
+library(pls)
+pls2lm <- plsr(Y~., data = as.data.frame(X), method = "oscorespls", ncomp = 35, validation = "LOO")
+summary(pls2lm)
+```
+
+The cross validation from the model is used to estimate the MSE of predictions for the PLS model.
+```{r}
+msecv_pls <- pls2lm$validation$PRESS / 25
+avg_msecv_pls <- rep(1,35)
+for(g in 1:35){
+  avg_msecv_pls[g] <- mean(msecv_pls[,g])}
+
+index <- 1:35
+plot(index, avg_msecv_pls, xlab = "Components", ylab = "MSE_CV", main = "PLS2 MSE_CV/component plot")
+```
+The number and value of principal components in the PLS model, with the lowest MSE, is found using the function below.   
+```{r}
+which.min(avg_msecv_pls)
+min(avg_msecv_pls)
+```
+### 5.2 PCR
+The principal component regression is made using the pcr() function, which automates the step of first making a PCA. The ncomp is set at 35 as before, since it is similarly expected that the model will start overfitting at some point before reaching 35 components.
+```{r}
+pcr <- pcr(Y~., data = as.data.frame(X), ncomp = 35, validation = "LOO")
+summary(pcr)
+```
+
+The cross validation from the model is used to estimate the MSE of predictions for the PCR model. 
+```{r}
+msecv_pcr <- pcr$validation$PRESS / 25
+avg_msecv_pcr <- rep(0,35)
+for(g in 1:35){
+  avg_msecv_pcr[g] <- mean(msecv_pcr[,g])}
+
+index <- 1:35
+plot(index, avg_msecv_pcr, xlab = "Components", ylab = "MSE_CV", main = "PCR MSE_CV/component plot")
+```
+The number and value of principal components in the PCR model, with the lowest MSE, is found using the function below.
+```{r}
+which.min(avg_msecv_pcr)
+min(avg_msecv_pcr)
+```
+## 6. Comparison and conclusion
+```{r}
+avg_msecv_pls - avg_msecv_pcr
+mean(avg_msecv_pcr)
+mean(avg_msecv_pls)
+```
+To conclude on the analysis, it is found that the PLS model performs better considering the MSE's of the two models. In the comparison each negative result is an instance, where the PLS performs better. It also has a lower average MSE, which indicates that it is better than the PCR model.
+A main reason that the PLS performs better, is because it includes Y in the components. Since the predictors are closely correlated, both the PCR and PLS will quickly be unable to explain more variance using only the predictors. By including the Y variables, the PLS has more data to explain variance, before it starts explaining on noise rather than real information.
